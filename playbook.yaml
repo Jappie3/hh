@@ -1,0 +1,62 @@
+---
+- name: Create Hetzner server
+  hosts: localhost
+  gather_facts: false
+  vars:
+    api_token: "{{ lookup('env', 'HETZNER_API_TOKEN') }}"
+    image: "{{ lookup('env', 'IMAGE') }}"
+    ssh_key: "{{ lookup('env', 'SSH_KEY') }}"
+    ipv4: "{{ lookup('env', 'IPv4') }}"
+    server_name: "{{ lookup('env', 'SERVER_NAME') }}"
+    server_type: "{{ lookup('env', 'SERVER_TYPE') }}"
+  tasks:
+    - name: Create firewall
+      hetzner.hcloud.hcloud_firewall:
+        api_token: "{{ api_token }}"
+        state: present
+        name: "{{ server_name }}-firewall"
+        rules:
+          - direction: in
+            description: "Allow SSH"
+            protocol: tcp
+            port: 22
+            source_ips:
+              - "0.0.0.0/0"
+              - "::0/0"
+          - direction: in
+            description: "Allow ICMP"
+            protocol: icmp
+            source_ips:
+              - "0.0.0.0/0"
+              - "::0/0"
+    - name: Create server
+      hetzner.hcloud.hcloud_server:
+        api_token: "{{ api_token }}"
+        state: present
+        name: "{{ server_name }}"
+        delete_protection: false
+        rebuild_protection: false
+        enable_ipv4: "{{ ipv4 }}"
+        enable_ipv6: true
+        ssh_keys:
+          - "{{ ssh_key }}"
+        firewalls:
+          - "{{ server_name }}-firewall"
+        image: "{{ image }}"
+        server_type: "{{ server_type | lower }}"
+        location: nbg1
+    - name: Get info about servers
+      hetzner.hcloud.hcloud_server_info:
+        api_token: "{{ api_token }}"
+        name: "{{ server_name }}"
+      register: servers
+    - name: Filter on server name
+      ansible.builtin.set_fact:
+        thisserver: "{{ servers.hcloud_server_info | selectattr('name', 'equalto', server_name) | list }}"
+    - name: Extract IPs
+      ansible.builtin.lineinfile:
+        path: ./.ip
+        create: true
+        mode: "0644"
+        # change IPv6 network (::/64) to an address (::1)
+        line: "{{ thisserver[0]['ipv6'].split('/')[0] }}1\n{{ thisserver[0]['ipv4_address'] }}"
